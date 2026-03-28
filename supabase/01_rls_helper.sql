@@ -7,9 +7,21 @@
 
 create or replace function public.get_my_company_id()
 returns uuid
-language sql stable
+language plpgsql stable
 security definer
 set search_path = public
 as $$
-  select company_id from public.profiles where id = auth.uid()
+declare
+  v_company_id uuid;
+begin
+  begin
+    execute 'select company_id from public.profiles where id = auth.uid()'
+      into v_company_id;
+  exception
+    when undefined_table then
+      return null;
+  end;
+
+  return v_company_id;
+end;
 $$;

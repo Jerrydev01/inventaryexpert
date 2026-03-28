@@ -20,10 +20,10 @@ create or replace function public.process_stock_in(
   p_item_id          uuid,
   p_to_location_id   uuid,
   p_quantity         numeric,
+  p_performed_by     uuid,
   p_batch_id         uuid    default null,
   p_reference_number text    default null,
-  p_note             text    default null,
-  p_performed_by     uuid
+  p_note             text    default null
 )
 returns uuid
 language plpgsql
@@ -68,10 +68,10 @@ create or replace function public.process_stock_out(
   p_item_id            uuid,
   p_from_location_id   uuid,
   p_quantity           numeric,
+  p_performed_by       uuid,
   p_batch_id           uuid    default null,
   p_reference_number   text    default null,
-  p_note               text    default null,
-  p_performed_by       uuid
+  p_note               text    default null
 )
 returns uuid
 language plpgsql
@@ -131,9 +131,9 @@ create or replace function public.process_transfer(
   p_from_location_id   uuid,
   p_to_location_id     uuid,
   p_quantity           numeric,
+  p_performed_by       uuid,
   p_batch_id           uuid    default null,
-  p_note               text    default null,
-  p_performed_by       uuid
+  p_note               text    default null
 )
 returns uuid
 language plpgsql
@@ -206,9 +206,9 @@ create or replace function public.process_return(
   p_from_location_id   uuid,
   p_to_location_id     uuid,
   p_quantity           numeric,
+  p_performed_by       uuid,
   p_batch_id           uuid    default null,
-  p_note               text    default null,
-  p_performed_by       uuid
+  p_note               text    default null
 )
 returns uuid
 language plpgsql
@@ -343,8 +343,8 @@ create or replace function public.process_asset_move(
   p_asset_id         uuid,
   p_to_location_id   uuid,
   p_type             public.transaction_type,  -- 'stock_out' | 'transfer' | 'return'
-  p_note             text    default null,
-  p_performed_by     uuid
+  p_performed_by     uuid,
+  p_note             text    default null
 )
 returns uuid
 language plpgsql

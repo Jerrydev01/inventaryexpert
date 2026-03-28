@@ -24,16 +24,7 @@ create policy "companies: read own"
   on public.companies for select
   using (id = public.get_my_company_id());
 
--- Only admins can update company details
-create policy "companies: admin update"
-  on public.companies for update
-  using (
-    id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+-- The admin update policy is created after public.profiles exists.
 
 -- Insert is handled server-side via service role during onboarding only.
 -- No client insert policy.

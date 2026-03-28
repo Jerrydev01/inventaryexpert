@@ -32,6 +32,24 @@ create policy "profiles: update own"
   on public.profiles for update
   using (id = auth.uid());
 
+-- Now that profiles exists, admins can update their company details.
+create policy "companies: admin update"
+  on public.companies for update
+  using (
+    id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  )
+  with check (
+    id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  );
+
 -- Admins can update any profile in their company (role changes, deactivation)
 create policy "profiles: admin update any"
   on public.profiles for update
