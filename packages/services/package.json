@@ -1,0 +1,17 @@
+{
+  "name": "@inventaryexpert/services",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inventaryexpert/types": "workspace:*",
+    "@supabase/supabase-js": "^2.98.0"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

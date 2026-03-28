@@ -44,6 +44,8 @@ These capabilities should remain generic and reusable across sectors:
 - audit logs
 - QR generation and parsing
 - subscriptions and billing state
+- clients (who companies bill)
+- invoices and invoice line items
 
 ### Sector Layer
 
@@ -158,19 +160,66 @@ Included in the first meaningful release:
 - pricing
 - subscription gating
 
-### Deferred Scope
+### Phase 2 Features
 
-Do not include these in the first release:
+Planned after the operational core is proven. These are not deferred forever — they are sequenced after the MVP generates trust:
 
-- invoicing
-- procurement
-- supplier management
-- GPS
-- advanced analytics
-- equipment maintenance
-- accounting behavior
+- **Invoicing** — create invoices from stock movements, track client payments, mark invoices as sent/paid/overdue
+- **Clients** — manage who the company bills (B2B clients tied to projects or recurring accounts)
+- **Supplier management** — track who delivers stock, link suppliers to batch records, see spend per supplier
+- **Purchase orders** — raise a PO against a supplier, mark received, auto-create stock-in
+- **Cycle count workflow** — scheduled or ad-hoc stock count requests, guided counting, auto-adjustment on submit
+- **Team invitations** — admin invites workers by email; they receive a link to join the company
+- **Low-stock reorder alerts** — set a minimum quantity threshold per item per location; email alert when breached
+- **Item images** — attach a photo to each item for field identification via Supabase Storage
+- **CSV and PDF export** — export balances, transaction history, and invoices without needing a reporting tool
+- **Activity feed** — company-wide timeline of all stock movements visible to managers and admins
+
+### Permanently Deferred
+
+Do not build these in any near-term milestone:
+
+- GPS tracking
+- accounting integrations (QuickBooks, Xero)
 - complex approval chains
 - multi-sector-per-company support
+- equipment maintenance scheduling
+
+## Differentiating Features
+
+What makes this platform stand out against generic inventory tools:
+
+### 1. Invoice Directly From Stock Movements
+
+Select stock-out transactions and generate a pre-filled invoice in one action. The invoice automatically contains the item names, quantities, and locations from the actual movement records. No manual re-entry. This closes the loop between field operations and billing.
+
+### 2. Sector-Aware Language Across the Entire UI
+
+A construction company sees "Materials", "Sites", and "Issue to Site". An agriculture company sees "Inputs", "Farms", and "Dispatch". The platform adapts its entire interface to the company's sector — not just a settings label but every heading, button, and empty state.
+
+### 3. Two-Mode QR (Batch vs Asset)
+
+Most inventory tools treat QR as a decoration. This platform ties QR directly to the record model. A batch QR tracks consumable stock from delivery to depletion. An asset QR tracks the physical location and status of reusable equipment through its entire lifecycle.
+
+### 4. Cycle Count Workflow
+
+Guides storekeepers through a structured stock count: request a count → count items one by one → submit → adjustments created automatically. No manual adjustment form. This encourages regular stock validation rather than one-off corrections.
+
+### 5. Supplier Ledger
+
+Every batch received is linked to a supplier. The platform shows spend per supplier, delivery frequency, and the full history of what was received from each source. This gives procurement visibility that generic tools do not provide.
+
+### 6. Multi-Sector From Day One
+
+A sales company and a construction company use the exact same platform and the same shared transaction engine. The sector module system means the platform can serve new sectors without rebuilding infrastructure — just a new module config and terminology set.
+
+### 7. Immutable Transaction Ledger
+
+No transaction can be deleted or edited. Every correction goes through an adjustment transaction with a required reason. This builds trust with managers and admins who need to know the history has not been tampered with.
+
+### 8. Mobile-First Field Execution
+
+The mobile app is purpose-built for field workers — narrow, fast, works with a camera scan. It is not a mobile version of the admin dashboard. Workers see only what they need to act on.
 
 ## Strict Execution Roadmap
 
@@ -455,6 +504,38 @@ Acceptance criteria:
 - pilot users can complete core tasks without manual database intervention
 - product issues can be diagnosed from logs and audit records
 
+### Milestone 10: Invoicing and Client Management
+
+Goal:
+Close the loop between stock movements and billing. Companies can create invoices, link them to clients, pre-fill line items from stock-out records, and track payment status.
+
+Deliverables:
+
+- client list and creation
+- invoice creation with manual line items
+- invoice pre-fill from selected stock-out transactions
+- invoice status lifecycle (draft, sent, paid, overdue, void)
+- invoice PDF export
+- client payment tracking
+- invoice history per client
+
+Dependencies:
+
+- milestones 5 and 9
+
+Main risks:
+
+- invoice totals diverge from actual stock movement values
+- companies use invoicing as a substitute for stock tracking
+- tax and currency handling becomes a rabbit hole early
+
+Acceptance criteria:
+
+- a company can create an invoice manually or from stock-out records
+- invoice status transitions are correct and audited
+- invoice PDF renders correctly
+- client payment recorded against invoice
+
 ## Critical Risks
 
 1. Platform breadth outruns execution depth.
@@ -471,7 +552,7 @@ Acceptance criteria:
 3. No release without immutable transaction records.
 4. No QR release without a defined record model behind the code.
 5. No multi-sector-per-company support in the first release.
-6. No invoicing in the MVP.
+6. No invoicing before the operational core (Milestones 1–9) is proven with real users.
 
 ## Immediate Next Actions
 

@@ -83,6 +83,14 @@ create type public.asset_status as enum (
   'under_maintenance',
   'retired'
 );
+
+create type public.invoice_status as enum (
+  'draft',
+  'sent',
+  'paid',
+  'overdue',
+  'cancelled'
+);
 ```
 
 ---
@@ -350,6 +358,80 @@ create table public.payments (
 
 ---
 
+### `clients`
+
+Companies that this business bills via invoices. Scoped per tenant.
+
+```sql
+create table public.clients (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references public.companies(id) on delete cascade,
+  name        text not null,
+  email       text,
+  phone       text,
+  address     text,
+  notes       text,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+```
+
+---
+
+### `invoices`
+
+Invoice header. Line items live in `invoice_line_items`.
+
+```sql
+create table public.invoices (
+  id             uuid primary key default gen_random_uuid(),
+  company_id     uuid not null references public.companies(id) on delete cascade,
+  client_id      uuid references public.clients(id) on delete set null,
+  invoice_number text not null,
+  status         public.invoice_status not null default 'draft',
+  issue_date     date not null default current_date,
+  due_date       date,
+  notes          text,
+  currency       text not null default 'NGN',
+  subtotal       numeric not null default 0 check (subtotal >= 0),
+  tax_amount     numeric not null default 0 check (tax_amount >= 0),
+  total          numeric not null default 0 check (total >= 0),
+  paid_at        timestamptz,
+  created_by     uuid not null references public.profiles(id),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique (company_id, invoice_number)
+);
+```
+
+> `invoice_number` is unique per company (e.g. `INV-0042`). The app generates the next number. `paid_at` is set when status transitions to `paid`.
+
+---
+
+### `invoice_line_items`
+
+Each row is one line on an invoice. Optionally linked to a `stock_transaction` when auto-generated from a stock-out event.
+
+```sql
+create table public.invoice_line_items (
+  id                   uuid primary key default gen_random_uuid(),
+  invoice_id           uuid not null references public.invoices(id) on delete cascade,
+  company_id           uuid not null references public.companies(id) on delete cascade,
+  item_id              uuid references public.items(id) on delete set null,
+  stock_transaction_id uuid references public.stock_transactions(id) on delete set null,
+  description          text not null,
+  quantity             numeric not null check (quantity > 0),
+  unit_price           numeric not null check (unit_price >= 0),
+  total                numeric not null check (total >= 0),
+  created_at           timestamptz not null default now()
+);
+```
+
+> `stock_transaction_id` is populated when an invoice is drafted directly from a stock-out event (differentiating feature: "invoice from movements").
+
+---
+
 ## Indexes
 
 ```sql
@@ -387,6 +469,20 @@ create index on public.qr_codes (company_id, record_type, record_id);
 
 -- Payments
 create index on public.payments (company_id);
+
+-- Clients
+create index on public.clients (company_id);
+create index on public.clients (company_id, is_active);
+
+-- Invoices
+create index on public.invoices (company_id, status);
+create index on public.invoices (company_id, created_at desc);
+create index on public.invoices (client_id) where client_id is not null;
+
+-- Invoice line items
+create index on public.invoice_line_items (invoice_id);
+create index on public.invoice_line_items (company_id);
+create index on public.invoice_line_items (stock_transaction_id) where stock_transaction_id is not null;
 ```
 
 ---
@@ -427,6 +523,9 @@ alter table public.audit_logs          enable row level security;
 alter table public.qr_codes            enable row level security;
 alter table public.subscriptions       enable row level security;
 alter table public.payments            enable row level security;
+alter table public.clients             enable row level security;
+alter table public.invoices            enable row level security;
+alter table public.invoice_line_items  enable row level security;
 ```
 
 ---
@@ -641,6 +740,111 @@ create policy "payments: read if admin"
 
 ---
 
+### `clients` — RLS
+
+```sql
+-- All company members can look up clients (needed when creating invoices)
+create policy "clients: read own company"
+  on public.clients for select
+  using (company_id = public.get_my_company_id());
+
+-- Only admins and managers create, update, or delete clients
+create policy "clients: write if manager or above"
+  on public.clients for all
+  using (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  )
+  with check (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  );
+```
+
+---
+
+### `invoices` — RLS
+
+```sql
+-- Admins and managers read invoices
+create policy "invoices: read if manager or above"
+  on public.invoices for select
+  using (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  );
+
+create policy "invoices: write if manager or above"
+  on public.invoices for all
+  using (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  )
+  with check (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  );
+```
+
+---
+
+### `invoice_line_items` — RLS
+
+```sql
+-- Line items inherit the same access level as their parent invoice
+create policy "invoice_line_items: read if manager or above"
+  on public.invoice_line_items for select
+  using (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  );
+
+create policy "invoice_line_items: write if manager or above"
+  on public.invoice_line_items for all
+  using (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  )
+  with check (
+    company_id = public.get_my_company_id()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'manager')
+    )
+  );
+```
+
+---
+
 ## Onboarding Trigger
 
 When a new auth user signs up, their profile is not automatically created. The sign-up server action must:
@@ -670,6 +874,9 @@ Do this inside a server action using the Supabase service role client. Never do 
 - [ ] A `worker` role user cannot insert or update `items`, `locations`, or `batches`
 - [ ] A `storekeeper` can insert a stock transaction but cannot update company settings
 - [ ] An `admin` can update company name and manage profiles
+- [ ] A `worker` or `storekeeper` receives zero rows when querying `invoices` or `clients`
+- [ ] `invoices` and `invoice_line_items` are accessible to `manager` and `admin` only
+- [ ] `invoice_line_items.stock_transaction_id` is nullable and accepts a valid `stock_transactions` FK
 - [ ] Schema works unchanged when populated with construction data and agriculture data simultaneously
 
 ---
