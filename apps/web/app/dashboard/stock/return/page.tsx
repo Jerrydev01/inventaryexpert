@@ -1,6 +1,8 @@
 import { returnStockAction } from "@/app/dashboard/actions/stock";
 import { StockForm } from "@/components/inventory/StockForm";
 import { createClient } from "@/lib/supabase/server";
+import { getModule } from "@/modules/registry";
+import type { Sector } from "@inventaryexpert/types";
 import { redirect } from "next/navigation";
 
 export default async function ReturnStockPage({
@@ -21,10 +23,15 @@ export default async function ReturnStockPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("company_id")
+    .select("company_id, companies(sector)")
     .eq("id", user.id)
     .single();
   if (!profile) redirect("/login");
+
+  const sector = ((profile.companies as { sector?: string } | null)?.sector ??
+    "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
 
   const [{ data: items }, { data: locations }] = await Promise.all([
     supabase
@@ -44,18 +51,22 @@ export default async function ReturnStockPage({
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Return Stock</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{labels.return}</h1>
         <p className="text-sm text-muted-foreground">
-          Return items from a site or field location back to a warehouse
+          Return {labels.items.toLowerCase()} from a{" "}
+          {labels.location.toLowerCase()} back to a central{" "}
+          {labels.location.toLowerCase()}
         </p>
       </div>
       <StockForm
-        title="Return Stock"
-        description="Move items from a site back to a warehouse or store"
+        title={labels.return}
+        description={`Move ${labels.items.toLowerCase()} from one ${labels.location.toLowerCase()} back to another`}
         items={items ?? []}
         locations={locations ?? []}
         mode="return"
         action={returnStockAction}
+        itemLabel={labels.item}
+        locationLabel={labels.location}
         defaultItemId={itemId}
         defaultFromLocationId={fromLocationId}
         defaultToLocationId={toLocationId}

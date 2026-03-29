@@ -2,6 +2,7 @@ import {
   MovementAreaChart,
   TransactionTypeBarChart,
 } from "@/components/dashboard/InventoryCharts";
+import { widgetRegistry } from "@/components/dashboard/widget-registry";
 import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Card,
@@ -11,7 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import type { TransactionTypeEnum } from "@inventaryexpert/types";
+import { getModule } from "@/modules/registry";
+import type { Sector, TransactionTypeEnum } from "@inventaryexpert/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -39,6 +41,11 @@ export default async function DashboardPage({
   if (!profile) redirect("/login");
 
   const companyId = profile.company_id;
+  const sector = ((
+    profile.companies as { name?: string; sector?: string } | null
+  )?.sector ?? "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
 
   let daysToFetch = 14;
   if (range === "30d") daysToFetch = 30;
@@ -156,11 +163,9 @@ export default async function DashboardPage({
             Live Overview
           </div>
           <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-            Dashboard
+            {module.displayName}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Monitor your inventory metrics and manage stock operations.
-          </p>
+          <p className="text-sm text-muted-foreground">{module.description}</p>
         </div>
 
         {/* Filter Toolbar */}
@@ -240,7 +245,7 @@ export default async function DashboardPage({
               <line x1="12" x2="12" y1="15" y2="3" />
             </svg>
           </div>
-          <span className="text-sm font-medium">Receive Stock</span>
+          <span className="text-sm font-medium">{labels.stockIn}</span>
         </Link>
         <Link
           href="/dashboard/stock/out"
@@ -263,7 +268,7 @@ export default async function DashboardPage({
               <line x1="12" x2="12" y1="3" y2="15" />
             </svg>
           </div>
-          <span className="text-sm font-medium">Issue Stock</span>
+          <span className="text-sm font-medium">{labels.stockOut}</span>
         </Link>
         <Link
           href="/dashboard/stock/transfer"
@@ -287,7 +292,7 @@ export default async function DashboardPage({
               <line x1="20" x2="4" y1="15" y2="15" />
             </svg>
           </div>
-          <span className="text-sm font-medium">Transfer</span>
+          <span className="text-sm font-medium">{labels.transfer}</span>
         </Link>
         <Link
           href="/dashboard/stock/return"
@@ -309,7 +314,7 @@ export default async function DashboardPage({
               <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </div>
-          <span className="text-sm font-medium">Return</span>
+          <span className="text-sm font-medium">{labels.return}</span>
         </Link>
         <Link
           href="/dashboard/stock/adjust"
@@ -331,7 +336,7 @@ export default async function DashboardPage({
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </div>
-          <span className="text-sm font-medium">Adjust</span>
+          <span className="text-sm font-medium">{labels.adjustment}</span>
         </Link>
       </div>
 
@@ -342,13 +347,13 @@ export default async function DashboardPage({
         aria-label="Key metrics"
       >
         <StatCard
-          title="Active Items"
+          title={`Active ${labels.items}`}
           value={itemCount ?? 0}
           href="/dashboard/items"
           linkLabel="Manage catalogue"
         />
         <StatCard
-          title="Locations"
+          title={labels.locations}
           value={locationCount ?? 0}
           href="/dashboard/locations"
           linkLabel="View all zones"
@@ -360,13 +365,32 @@ export default async function DashboardPage({
           linkLabel="View history logs"
         />
         <StatCard
-          title="Low Stock Alerts"
+          title={`${labels.items} Low Stock`}
           value={lowStockRows?.length ?? 0}
           href="/dashboard/balances/low-stock"
           linkLabel="Review low stock"
           highlight={(lowStockRows?.length ?? 0) > 0}
         />
       </div>
+
+      {/* Module Widgets
+      {module.dashboard.primary.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {module.dashboard.primary.map((key) => {
+            const Widget = widgetRegistry[key];
+            return Widget ? <Widget key={`primary-${key}`} /> : null;
+          })}
+        </div>
+      )} */}
+
+      {module.dashboard.secondary.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {module.dashboard.secondary.map((key) => {
+            const Widget = widgetRegistry[key];
+            return Widget ? <Widget key={`secondary-${key}`} /> : null;
+          })}
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid gap-5 grid-cols-1 xl:grid-cols-3">
@@ -419,14 +443,15 @@ export default async function DashboardPage({
 
       <div className="grid gap-5 grid-cols-1 xl:grid-cols-3">
         {/* ── Recent Activity feed ── */}
-        <Card className="xl:col-span-2 overflow-hidden border-border/60 shadow-sm p-0">
+        <Card className="xl:col-span-2 overflow-hidden border-border/60 shadow-sm p-0 relative">
           <CardHeader className="flex flex-row items-center justify-between py-4 px-6 border-b border-border/40 bg-gradient-to-br from-muted/40 to-transparent">
             <div className="space-y-0.5">
               <CardTitle className="text-base font-semibold">
                 Recent Activity
               </CardTitle>
               <CardDescription className="text-xs">
-                Latest stock operations across all locations
+                Latest {labels.item.toLowerCase()} stock operations across all{" "}
+                {labels.locations.toLowerCase()}
               </CardDescription>
             </div>
             <Link
@@ -474,7 +499,8 @@ export default async function DashboardPage({
                 No operations yet
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Stock movements will appear here in real time.
+                {labels.stockIn}, {labels.stockOut}, and {labels.transfer}{" "}
+                activity will appear here in real time.
               </p>
             </div>
           ) : (
@@ -632,7 +658,7 @@ export default async function DashboardPage({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-foreground truncate">
-                          {item?.name ?? "Unknown item"}
+                          {item?.name ?? `Unknown ${labels.item.toLowerCase()}`}
                         </span>
                         <span
                           className={`hidden sm:inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${cfg.bg} ${cfg.text} border-current/20`}
@@ -670,7 +696,7 @@ export default async function DashboardPage({
             </div>
           )}
 
-          <div className="px-6 py-3 border-t border-border/40 bg-muted/20 flex items-center justify-between">
+          <div className="px-6 py-3 border-t border-border/40 bg-muted/20 flex items-center justify-between absolute w-full bottom-0">
             <span className="text-xs text-muted-foreground">
               Showing last {recentTx?.length ?? 0} operations
             </span>
@@ -702,7 +728,7 @@ export default async function DashboardPage({
                   )}
                 </CardTitle>
                 <CardDescription className="text-xs mt-0.5">
-                  Items below reorder threshold
+                  {labels.items} below reorder threshold
                 </CardDescription>
               </div>
               {(lowStockRows?.length ?? 0) === 0 && (
@@ -732,7 +758,7 @@ export default async function DashboardPage({
                   All clear
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed max-w-[180px]">
-                  Every item is within its safe stock level.
+                  All {labels.items.toLowerCase()} are within safe stock levels.
                 </p>
               </div>
             ) : (
@@ -836,7 +862,7 @@ export default async function DashboardPage({
                   >
                     <path d="m8 3 4 8 5-5 5 15H2L8 3z" />
                   </svg>
-                  Restock {lowStockRows?.length} item
+                  Restock {lowStockRows?.length} {labels.item.toLowerCase()}
                   {(lowStockRows?.length ?? 0) > 1 ? "s" : ""}
                 </>
               ) : (

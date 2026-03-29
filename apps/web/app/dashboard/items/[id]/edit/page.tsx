@@ -27,7 +27,9 @@ export default async function EditItemPage({
 
   const { data: item } = await supabase
     .from("items")
-    .select("id, name, sku, unit, category, description, is_tracked_asset")
+    .select(
+      "id, name, sku, unit, category, description, is_tracked_asset, image_path",
+    )
     .eq("id", id)
     .eq("company_id", profile.company_id)
     .single();
@@ -46,6 +48,8 @@ export default async function EditItemPage({
       </div>
       <ItemForm
         action={boundAction}
+        companyId={profile.company_id}
+        itemId={item.id}
         defaultValues={{
           name: item.name,
           sku: item.sku ?? undefined,
@@ -53,6 +57,7 @@ export default async function EditItemPage({
           category: item.category ?? undefined,
           description: item.description ?? undefined,
           is_tracked_asset: item.is_tracked_asset,
+          image_path: item.image_path,
         }}
         submitLabel="Update Item"
       />

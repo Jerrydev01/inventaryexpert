@@ -1,6 +1,8 @@
 import { adjustmentAction } from "@/app/dashboard/actions/stock";
 import { StockForm } from "@/components/inventory/StockForm";
 import { createClient } from "@/lib/supabase/server";
+import { getModule } from "@/modules/registry";
+import type { Sector } from "@inventaryexpert/types";
 import { redirect } from "next/navigation";
 
 export default async function AdjustmentPage({
@@ -17,7 +19,7 @@ export default async function AdjustmentPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("company_id, role")
+    .select("company_id, role, companies(sector)")
     .eq("id", user.id)
     .single();
   if (!profile) redirect("/login");
@@ -25,6 +27,11 @@ export default async function AdjustmentPage({
   if (!["admin", "manager"].includes(profile.role)) {
     redirect("/dashboard");
   }
+
+  const sector = ((profile.companies as { sector?: string } | null)?.sector ??
+    "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
 
   const [{ data: items }, { data: locations }] = await Promise.all([
     supabase
@@ -44,18 +51,22 @@ export default async function AdjustmentPage({
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Stock Adjustment</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {labels.adjustment}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Correct stock quantities after a physical count
+          Correct {labels.item.toLowerCase()} quantities after a physical count
         </p>
       </div>
       <StockForm
-        title="Adjust Stock"
-        description="Set the actual quantity found during physical count. Requires a reason."
+        title={labels.adjustment}
+        description={`Set the actual ${labels.item.toLowerCase()} quantity found during physical count. Requires a reason.`}
         items={items ?? []}
         locations={locations ?? []}
         mode="adjust"
         action={adjustmentAction}
+        itemLabel={labels.item}
+        locationLabel={labels.location}
         defaultItemId={itemId}
         defaultLocationId={locationId}
       />

@@ -17,7 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
-import type { UserRoleEnum } from "@inventaryexpert/types";
+import { getModule } from "@/modules/registry";
+import type { Sector, UserRoleEnum } from "@inventaryexpert/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -30,10 +31,15 @@ export default async function LocationsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, company_id, role")
+    .select("id, company_id, role, companies(sector)")
     .eq("id", user.id)
     .single();
   if (!profile) redirect("/login");
+
+  const sector = ((profile.companies as { sector?: string } | null)?.sector ??
+    "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
 
   const { data: locations, error } = await supabase
     .from("locations")
@@ -46,9 +52,11 @@ export default async function LocationsPage() {
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Locations</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {labels.locations}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Manage warehouses, stores, and sites
+            Manage all your {labels.locations.toLowerCase()}
           </p>
         </div>
         <RoleGate
@@ -56,16 +64,16 @@ export default async function LocationsPage() {
           role={profile.role as UserRoleEnum}
         >
           <Link href="/dashboard/locations/new" className={buttonVariants()}>
-            Add Location
+            Add {labels.location}
           </Link>
         </RoleGate>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Locations</CardTitle>
+          <CardTitle>{labels.locations}</CardTitle>
           <CardDescription>
-            {locations?.length ?? 0} active location
+            {locations?.length ?? 0} active {labels.location.toLowerCase()}
             {locations?.length !== 1 ? "s" : ""}
           </CardDescription>
         </CardHeader>
@@ -77,7 +85,8 @@ export default async function LocationsPage() {
           ) : !locations || locations.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-12">
               <p className="text-sm text-muted-foreground">
-                No locations yet. Add your first location to get started.
+                No {labels.locations.toLowerCase()} yet. Add your first{" "}
+                {labels.location.toLowerCase()} to get started.
               </p>
               <RoleGate
                 allow={["admin", "manager"]}
@@ -87,7 +96,7 @@ export default async function LocationsPage() {
                   href="/dashboard/locations/new"
                   className={buttonVariants({ variant: "outline" })}
                 >
-                  Add Location
+                  Add {labels.location}
                 </Link>
               </RoleGate>
             </div>

@@ -17,7 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
-import type { UserRoleEnum } from "@inventaryexpert/types";
+import { getModule } from "@/modules/registry";
+import type { Sector, UserRoleEnum } from "@inventaryexpert/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -36,6 +37,11 @@ export default async function ItemsPage() {
 
   if (!profile) redirect("/login");
 
+  const sector = ((profile.companies as { sector?: string } | null)?.sector ??
+    "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
+
   const { data: items, error } = await supabase
     .from("items")
     .select("id, name, sku, unit, category, is_tracked_asset, is_active")
@@ -47,9 +53,9 @@ export default async function ItemsPage() {
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Items</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{labels.items}</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your inventory item catalogue
+            Manage your {labels.item.toLowerCase()} catalogue
           </p>
         </div>
         <RoleGate
@@ -57,16 +63,17 @@ export default async function ItemsPage() {
           role={profile.role as UserRoleEnum}
         >
           <Link href="/dashboard/items/new" className={buttonVariants()}>
-            Add Item
+            Add {labels.item}
           </Link>
         </RoleGate>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Item Catalogue</CardTitle>
+          <CardTitle>{labels.item} Catalogue</CardTitle>
           <CardDescription>
-            {items?.length ?? 0} active item{items?.length !== 1 ? "s" : ""}
+            {items?.length ?? 0} active {labels.item.toLowerCase()}
+            {items?.length !== 1 ? "s" : ""}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -77,7 +84,8 @@ export default async function ItemsPage() {
           ) : !items || items.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-12">
               <p className="text-sm text-muted-foreground">
-                No items yet. Add your first item to get started.
+                No {labels.items.toLowerCase()} yet. Add your first{" "}
+                {labels.item.toLowerCase()} to get started.
               </p>
               <RoleGate
                 allow={["admin", "manager"]}
@@ -87,7 +95,7 @@ export default async function ItemsPage() {
                   href="/dashboard/items/new"
                   className={buttonVariants({ variant: "outline" })}
                 >
-                  Add your first item
+                  Add your first {labels.item.toLowerCase()}
                 </Link>
               </RoleGate>
             </div>

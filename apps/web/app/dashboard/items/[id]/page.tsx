@@ -1,3 +1,4 @@
+import SmartImage from "@/components/custom/smart-image";
 import { BalanceBadge } from "@/components/inventory/BalanceBadge";
 import { RoleGate } from "@/components/inventory/RoleGate";
 import { Badge } from "@/components/ui/badge";
@@ -44,13 +45,22 @@ export default async function ItemDetailPage({
   const { data: item } = await supabase
     .from("items")
     .select(
-      "id, name, sku, unit, category, description, is_tracked_asset, is_active",
+      "id, name, sku, unit, category, description, is_tracked_asset, is_active, image_path",
     )
     .eq("id", id)
     .eq("company_id", profile.company_id)
     .single();
 
   if (!item) notFound();
+
+  // Fetch a short-lived signed URL for the private items bucket
+  let imageSignedUrl: string | null = null;
+  if (item.image_path) {
+    const { data: signedData } = await supabase.storage
+      .from("items")
+      .createSignedUrl(item.image_path, 60 * 60); // 1 hour
+    imageSignedUrl = signedData?.signedUrl ?? null;
+  }
 
   const { data: balances } = await supabase
     .from("inventory_balances")
@@ -65,20 +75,53 @@ export default async function ItemDetailPage({
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight">{item.name}</h1>
-            {!item.is_active && (
-              <Badge variant="outline" className="text-muted-foreground">
-                Inactive
-              </Badge>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-4">
+          {/* Item image / placeholder */}
+          <div className="shrink-0 h-20 w-20 rounded-2xl overflow-hidden border border-border/60 bg-muted/40 flex items-center justify-center">
+            {imageSignedUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <SmartImage
+                width={100}
+                height={100}
+                src={imageSignedUrl}
+                alt={item.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-muted-foreground"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
             )}
           </div>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {item.sku ? `SKU: ${item.sku} · ` : ""}Unit: {item.unit}
-            {item.category ? ` · ${item.category}` : ""}
-          </p>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight">{item.name}</h1>
+              {!item.is_active && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  Inactive
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {item.sku ? `SKU: ${item.sku} · ` : ""}Unit: {item.unit}
+              {item.category ? ` · ${item.category}` : ""}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <RoleGate

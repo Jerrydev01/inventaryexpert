@@ -12,11 +12,11 @@ export default async function NewItemPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, company_id")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["admin", "manager"].includes(profile.role)) {
+  if (!profile || !(["admin", "manager"] as string[]).includes(profile.role)) {
     redirect("/dashboard/items");
   }
 
@@ -28,7 +28,11 @@ export default async function NewItemPage() {
           Add a new item to your inventory catalogue
         </p>
       </div>
-      <ItemForm action={createItemAction} submitLabel="Create Item" />
+      <ItemForm
+        action={createItemAction}
+        companyId={profile.company_id}
+        submitLabel="Create Item"
+      />
     </div>
   );
 }

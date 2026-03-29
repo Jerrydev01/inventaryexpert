@@ -1,6 +1,8 @@
 import { stockInAction } from "@/app/dashboard/actions/stock";
 import { StockForm } from "@/components/inventory/StockForm";
 import { createClient } from "@/lib/supabase/server";
+import { getModule } from "@/modules/registry";
+import type { Sector } from "@inventaryexpert/types";
 import { redirect } from "next/navigation";
 
 export default async function StockInPage({
@@ -17,10 +19,15 @@ export default async function StockInPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("company_id")
+    .select("company_id, companies(sector)")
     .eq("id", user.id)
     .single();
   if (!profile) redirect("/login");
+
+  const sector = ((profile.companies as { sector?: string } | null)?.sector ??
+    "other") as Sector;
+  const module = getModule(sector);
+  const labels = module.labels;
 
   const [{ data: items }, { data: locations }] = await Promise.all([
     supabase
@@ -40,17 +47,20 @@ export default async function StockInPage({
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Stock In</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{labels.stockIn}</h1>
         <p className="text-sm text-muted-foreground">
-          Receive items into a location
+          Receive {labels.items.toLowerCase()} into a{" "}
+          {labels.location.toLowerCase()}
         </p>
       </div>
       <StockForm
-        title="Stock In"
+        title={labels.stockIn}
         items={items ?? []}
         locations={locations ?? []}
         mode="in"
         action={stockInAction}
+        itemLabel={labels.item}
+        locationLabel={labels.location}
         defaultItemId={itemId}
         defaultToLocationId={toLocationId}
       />

@@ -38,10 +38,15 @@ export async function createItemAction(
   const category = (formData.get("category") as string)?.trim() || null;
   const description = (formData.get("description") as string)?.trim() || null;
   const is_tracked_asset = formData.get("is_tracked_asset") === "true";
+  // Client-generated UUID for this item (needed to build the storage path before insert)
+  const item_id = (formData.get("item_id") as string)?.trim() || undefined;
+  // Storage path set by the client after uploading the optimized image
+  const image_path = (formData.get("image_path") as string)?.trim() || null;
 
   if (!name) return { error: "Name is required" };
 
   const { error } = await supabase.from("items").insert({
+    ...(item_id ? { id: item_id } : {}),
     company_id: profile.company_id,
     name,
     sku,
@@ -49,6 +54,7 @@ export async function createItemAction(
     category,
     description,
     is_tracked_asset,
+    ...(image_path ? { image_path } : {}),
   });
 
   if (error) {
@@ -76,12 +82,21 @@ export async function updateItemAction(
   const unit = (formData.get("unit") as string)?.trim() || "unit";
   const category = (formData.get("category") as string)?.trim() || null;
   const description = (formData.get("description") as string)?.trim() || null;
+  const image_path =
+    (formData.get("image_path") as string)?.trim() || undefined;
 
   if (!name) return { error: "Name is required" };
 
   const { error } = await supabase
     .from("items")
-    .update({ name, sku, unit, category, description })
+    .update({
+      name,
+      sku,
+      unit,
+      category,
+      description,
+      ...(image_path !== undefined ? { image_path } : {}),
+    })
     .eq("id", id)
     .eq("company_id", profile.company_id);
 

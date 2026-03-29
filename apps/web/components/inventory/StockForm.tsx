@@ -32,6 +32,8 @@ interface StockFormProps {
   defaultFromLocationId?: string;
   defaultToLocationId?: string;
   defaultLocationId?: string;
+  itemLabel?: string;
+  locationLabel?: string;
 }
 
 export function StockForm({
@@ -45,6 +47,8 @@ export function StockForm({
   defaultFromLocationId,
   defaultToLocationId,
   defaultLocationId,
+  itemLabel = "Item",
+  locationLabel = "Location",
 }: StockFormProps) {
   const router = useRouter();
   const [error, setError] = React.useState<string | null>(null);
@@ -89,7 +93,7 @@ export function StockForm({
           <ItemSelect
             items={items}
             name="itemId"
-            label="Item *"
+            label={`${itemLabel} *`}
             required
             defaultValue={defaultItemId}
           />
@@ -98,7 +102,7 @@ export function StockForm({
             <LocationSelect
               locations={locations}
               name="fromLocationId"
-              label="From Location *"
+              label={`From ${locationLabel} *`}
               required
               defaultValue={defaultFromLocationId}
             />
@@ -108,7 +112,7 @@ export function StockForm({
             <LocationSelect
               locations={locations}
               name="toLocationId"
-              label="To Location *"
+              label={`To ${locationLabel} *`}
               required
               defaultValue={defaultToLocationId}
             />
@@ -118,7 +122,7 @@ export function StockForm({
             <LocationSelect
               locations={locations}
               name="locationId"
-              label="Location *"
+              label={`${locationLabel} *`}
               required
               defaultValue={defaultLocationId}
             />
