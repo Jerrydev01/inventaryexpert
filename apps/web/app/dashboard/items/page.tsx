@@ -1,0 +1,149 @@
+import { RoleGate } from "@/components/inventory/RoleGate";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button-variants";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { createClient } from "@/lib/supabase/server";
+import type { UserRoleEnum } from "@inventaryexpert/types";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+
+export default async function ItemsPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, company_id, role, companies(sector)")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) redirect("/login");
+
+  const { data: items, error } = await supabase
+    .from("items")
+    .select("id, name, sku, unit, category, is_tracked_asset, is_active")
+    .eq("company_id", profile.company_id)
+    .eq("is_active", true)
+    .order("name");
+
+  return (
+    <div className="flex flex-1 flex-col gap-6 p-4 pt-0 lg:p-6 lg:pt-0">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Items</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage your inventory item catalogue
+          </p>
+        </div>
+        <RoleGate
+          allow={["admin", "manager"]}
+          role={profile.role as UserRoleEnum}
+        >
+          <Link href="/dashboard/items/new" className={buttonVariants()}>
+            Add Item
+          </Link>
+        </RoleGate>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Item Catalogue</CardTitle>
+          <CardDescription>
+            {items?.length ?? 0} active item{items?.length !== 1 ? "s" : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <p className="py-8 text-center text-sm text-destructive">
+              Failed to load items. Please try again.
+            </p>
+          ) : !items || items.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-12">
+              <p className="text-sm text-muted-foreground">
+                No items yet. Add your first item to get started.
+              </p>
+              <RoleGate
+                allow={["admin", "manager"]}
+                role={profile.role as UserRoleEnum}
+              >
+                <Link
+                  href="/dashboard/items/new"
+                  className={buttonVariants({ variant: "outline" })}
+                >
+                  Add your first item
+                </Link>
+              </RoleGate>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="w-[80px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((item) => (
+                  <TableRow key={item.id} className="cursor-pointer">
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/dashboard/items/${item.id}`}
+                        className="hover:underline"
+                      >
+                        {item.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.sku ?? "—"}
+                    </TableCell>
+                    <TableCell>{item.unit}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.category ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {item.is_tracked_asset ? "Asset" : "Stock"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/dashboard/items/${item.id}`}
+                        className={buttonVariants({
+                          size: "sm",
+                          variant: "ghost",
+                        })}
+                      >
+                        View
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

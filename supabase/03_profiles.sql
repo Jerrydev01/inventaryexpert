@@ -19,6 +19,51 @@ create table public.profiles (
 -- Indexes
 create index on public.profiles (company_id);
 
+-- Auth bootstrap
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  company_name text;
+  company_sector public.sector;
+  new_company_id uuid;
+begin
+  company_name := nullif(btrim(new.raw_user_meta_data->>'company_name'), '');
+
+  if company_name is null then
+    raise exception 'company_name is required in raw_user_meta_data';
+  end if;
+
+  company_sector := coalesce(
+    nullif(new.raw_user_meta_data->>'sector', '')::public.sector,
+    'other'::public.sector
+  );
+
+  insert into public.companies (name, sector)
+  values (company_name, company_sector)
+  returning id into new_company_id;
+
+  insert into public.profiles (id, company_id, role, full_name)
+  values (
+    new.id,
+    new_company_id,
+    'admin',
+    nullif(new.raw_user_meta_data->>'full_name', '')
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
 -- RLS
 alter table public.profiles enable row level security;
 
@@ -61,5 +106,5 @@ create policy "profiles: admin update any"
     )
   );
 
--- Insert is handled server-side via service role during onboarding only.
--- No client insert policy.
+-- Insert is handled server-side by the auth bootstrap trigger and any future
+-- privileged onboarding flows. No client insert policy.

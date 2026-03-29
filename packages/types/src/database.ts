@@ -1,6 +1,6 @@
 /**
  * Auto-generated Supabase Database type.
- * Source of truth: /supabase/00_enums.sql – 16_invoice_line_items.sql
+ * Source of truth: /supabase/00_enums.sql - 19_sector_options.sql
  * Regenerate with: supabase gen types typescript --local > packages/types/src/database.ts
  *
  * Hand-maintained until a live Supabase project is linked.
@@ -829,6 +829,14 @@ export type Database = {
     // Functions
     // ------------------------------------------------------------------
     Functions: {
+      get_available_sectors: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          value: Database["public"]["Enums"]["sector"];
+          label: string;
+          sort_order: number;
+        }[];
+      };
       get_my_company_id: {
         Args: Record<PropertyKey, never>;
         Returns: string;

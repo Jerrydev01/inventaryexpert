@@ -68,76 +68,91 @@ on conflict (id) do nothing;
 -- ------------------------------------------------------------
 -- logos bucket (public read, admin/manager write)
 -- ------------------------------------------------------------
-create policy "logos: public read"
-  on storage.objects for select
-  using (bucket_id = 'logos');
 
-create policy "logos: upload if admin or manager"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-        -- first path segment must be the caller's company_id
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+DO $$ BEGIN
+  CREATE POLICY "logos: public read"
+    ON storage.objects FOR SELECT
+    USING (bucket_id = 'logos');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
-create policy "logos: update if admin or manager"
-  on storage.objects for update
-  using (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+DO $$ BEGIN
+  CREATE POLICY "logos: upload if admin or manager"
+    ON storage.objects FOR INSERT
+    WITH CHECK (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
-create policy "logos: delete if admin"
-  on storage.objects for delete
-  using (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role = 'admin'
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+DO $$ BEGIN
+  CREATE POLICY "logos: update if admin or manager"
+    ON storage.objects FOR UPDATE
+    USING (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "logos: delete if admin"
+    ON storage.objects FOR DELETE
+    USING (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role = 'admin'
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 
 -- ------------------------------------------------------------
 -- avatars bucket (public read, owner write)
 -- ------------------------------------------------------------
-create policy "avatars: public read"
-  on storage.objects for select
-  using (bucket_id = 'avatars');
+DO $$ BEGIN
+  CREATE POLICY "avatars: public read"
+    ON storage.objects FOR SELECT
+    USING (bucket_id = 'avatars');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
-create policy "avatars: upload own"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'avatars'
-    -- first path segment must be the caller's own user_id
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+DO $$ BEGIN
+  CREATE POLICY "avatars: upload own"
+    ON storage.objects FOR INSERT
+    WITH CHECK (
+      bucket_id = 'avatars'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
-create policy "avatars: update own"
-  on storage.objects for update
-  using (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+DO $$ BEGIN
+  CREATE POLICY "avatars: update own"
+    ON storage.objects FOR UPDATE
+    USING (
+      bucket_id = 'avatars'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
-create policy "avatars: delete own"
-  on storage.objects for delete
-  using (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+DO $$ BEGIN
+  CREATE POLICY "avatars: delete own"
+    ON storage.objects FOR DELETE
+    USING (
+      bucket_id = 'avatars'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 
 -- ------------------------------------------------------------

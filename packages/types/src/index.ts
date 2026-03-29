@@ -49,6 +49,15 @@ export type {
 export type Sector = import("./database").SectorEnum;
 export type UserRole = import("./database").UserRoleEnum;
 
+// Sector module contract
+export type {
+  DashboardWidgets,
+  NavItem,
+  OnboardingConfig,
+  SectorLabels,
+  SectorModule,
+} from "./module";
+
 // Inventory operation types
 export type {
   AdjustmentInput,

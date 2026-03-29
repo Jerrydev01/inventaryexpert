@@ -93,17 +93,19 @@ create table public.companies (
 -- No index needed — primary key only. Looked up by id from profiles.
 
 -- RLS
+
 alter table public.companies enable row level security;
 
--- Users can read their own company only
-create policy "companies: read own"
-  on public.companies for select
-  using (id = public.get_my_company_id());
+do $$ begin
+  create policy "companies: read own"
+    on public.companies for select
+    using (id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
 -- The admin update policy is created after public.profiles exists.
 
--- Insert is handled server-side via service role during onboarding only.
--- No client insert policy.
+-- Insert is handled server-side by the auth bootstrap trigger and any future
+-- privileged onboarding flows. No client insert policy.
 -- ============================================================
 -- 03_profiles.sql
 -- Requires: 00_enums.sql, 01_rls_helper.sql, 02_companies.sql
@@ -125,50 +127,126 @@ create table public.profiles (
 -- Indexes
 create index on public.profiles (company_id);
 
+-- Auth bootstrap
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  company_name text;
+  company_sector public.sector;
+  new_company_id uuid;
+begin
+  company_name := nullif(btrim(new.raw_user_meta_data->>'company_name'), '');
+
+  if company_name is null then
+    raise exception 'company_name is required in raw_user_meta_data';
+  end if;
+
+  company_sector := coalesce(
+    nullif(new.raw_user_meta_data->>'sector', '')::public.sector,
+    'other'::public.sector
+  );
+
+  insert into public.companies (name, sector)
+  values (company_name, company_sector)
+  returning id into new_company_id;
+
+  insert into public.profiles (id, company_id, role, full_name)
+  values (
+    new.id,
+    new_company_id,
+    'admin',
+    nullif(new.raw_user_meta_data->>'full_name', '')
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+create or replace function public.get_available_sectors()
+returns table (
+  value public.sector,
+  label text,
+  sort_order integer
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    sector_value,
+    case sector_value
+      when 'construction'::public.sector then 'Construction'
+      when 'agriculture'::public.sector then 'Agriculture'
+      when 'sales'::public.sector then 'Sales / Retail'
+      when 'other'::public.sector then 'General / Other'
+    end as label,
+    sector_index::integer as sort_order
+  from unnest(enum_range(null::public.sector)) with ordinality as sectors(sector_value, sector_index)
+  order by sector_index;
+$$;
+
+grant execute on function public.get_available_sectors() to anon, authenticated;
+
 -- RLS
 alter table public.profiles enable row level security;
 
--- All members of a company can read each other's profiles
-create policy "profiles: read own company"
-  on public.profiles for select
-  using (company_id = public.get_my_company_id());
 
--- Users can update their own profile (name, etc.)
-create policy "profiles: update own"
-  on public.profiles for update
-  using (id = auth.uid());
+do $$ begin
+  create policy "profiles: read own company"
+    on public.profiles for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
--- Now that profiles exists, admins can update their company details.
-create policy "companies: admin update"
-  on public.companies for update
-  using (
-    id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
+do $$ begin
+  create policy "profiles: update own"
+    on public.profiles for update
+    using (id = auth.uid());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "companies: admin update"
+    on public.companies for update
+    using (
+      id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role = 'admin'
+      )
     )
-  )
-  with check (
-    id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+    with check (
+      id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role = 'admin'
+      )
+    );
+exception when duplicate_object then null; end $$;
 
--- Admins can update any profile in their company (role changes, deactivation)
-create policy "profiles: admin update any"
-  on public.profiles for update
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+do $$ begin
+  create policy "profiles: admin update any"
+    on public.profiles for update
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role = 'admin'
+      )
+    );
+exception when duplicate_object then null; end $$;
 
--- Insert is handled server-side via service role during onboarding only.
--- No client insert policy.
+-- Insert is handled server-side by the auth bootstrap trigger and any future
+-- privileged onboarding flows. No client insert policy.
 -- ============================================================
 -- 04_locations.sql
 -- Requires: 00_enums.sql, 01_rls_helper.sql, 02_companies.sql, 03_profiles.sql
@@ -194,21 +272,24 @@ create index on public.locations (parent_id);
 -- RLS
 alter table public.locations enable row level security;
 
--- All company members can read locations
-create policy "locations: read own company"
-  on public.locations for select
-  using (company_id = public.get_my_company_id());
 
--- Only managers and admins can create, update, or deactivate locations
-create policy "locations: write if manager or admin"
-  on public.locations for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "locations: read own company"
+    on public.locations for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "locations: write if manager or admin"
+    on public.locations for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 05_items.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 03_profiles.sql
@@ -241,21 +322,24 @@ create index on public.items (company_id);
 -- RLS
 alter table public.items enable row level security;
 
--- All company members can read the item catalogue
-create policy "items: read own company"
-  on public.items for select
-  using (company_id = public.get_my_company_id());
 
--- Only managers and admins can create, update, or deactivate items
-create policy "items: write if manager or admin"
-  on public.items for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "items: read own company"
+    on public.items for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "items: write if manager or admin"
+    on public.items for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 06_batches.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 03_profiles.sql, 05_items.sql
@@ -281,21 +365,24 @@ create index on public.batches (company_id, item_id);
 -- RLS
 alter table public.batches enable row level security;
 
--- All company members can read batches
-create policy "batches: read own company"
-  on public.batches for select
-  using (company_id = public.get_my_company_id());
 
--- Storekeepers, managers, and admins can create and update batches
-create policy "batches: write if storekeeper or above"
-  on public.batches for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role in ('admin', 'manager', 'storekeeper')
-    )
-  );
+do $$ begin
+  create policy "batches: read own company"
+    on public.batches for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "batches: write if storekeeper or above"
+    on public.batches for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role in ('admin', 'manager', 'storekeeper')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 07_assets.sql
 -- Requires: 00_enums.sql, 01_rls_helper.sql, 02_companies.sql, 04_locations.sql, 05_items.sql
@@ -326,21 +413,24 @@ create index on public.assets (location_id);
 -- RLS
 alter table public.assets enable row level security;
 
--- All company members can read assets
-create policy "assets: read own company"
-  on public.assets for select
-  using (company_id = public.get_my_company_id());
 
--- Storekeepers, managers, and admins can create and update assets
-create policy "assets: write if storekeeper or above"
-  on public.assets for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role in ('admin', 'manager', 'storekeeper')
-    )
-  );
+do $$ begin
+  create policy "assets: read own company"
+    on public.assets for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "assets: write if storekeeper or above"
+    on public.assets for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles
+        where id = auth.uid() and role in ('admin', 'manager', 'storekeeper')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 08_inventory_balances.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 04_locations.sql, 05_items.sql
@@ -368,10 +458,12 @@ create index on public.inventory_balances (company_id, location_id);
 -- RLS
 alter table public.inventory_balances enable row level security;
 
--- All company members can read balances
-create policy "balances: read own company"
-  on public.inventory_balances for select
-  using (company_id = public.get_my_company_id());
+
+do $$ begin
+  create policy "balances: read own company"
+    on public.inventory_balances for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
 -- Balances are written by the transaction engine via service role (RPC functions).
 -- No direct client write policy is created.
@@ -413,10 +505,12 @@ create index on public.stock_transactions (asset_id) where asset_id is not null;
 -- RLS
 alter table public.stock_transactions enable row level security;
 
--- All company members can read the transaction ledger
-create policy "transactions: read own company"
-  on public.stock_transactions for select
-  using (company_id = public.get_my_company_id());
+
+do $$ begin
+  create policy "transactions: read own company"
+    on public.stock_transactions for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
 -- Rows are inserted by the transaction engine RPCs (service role).
 -- No client-side insert, update, or delete policy is ever created.
@@ -449,17 +543,19 @@ create index on public.audit_logs (company_id, action);
 -- RLS
 alter table public.audit_logs enable row level security;
 
--- Only admins and managers see audit logs
-create policy "audit_logs: read admin/manager"
-  on public.audit_logs for select
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+
+do $$ begin
+  create policy "audit_logs: read admin/manager"
+    on public.audit_logs for select
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
 -- Rows are inserted by service role (triggers / RPCs). No client insert policy.
 -- ============================================================
@@ -488,32 +584,38 @@ create index on public.qr_codes (payload);  -- already unique, but explicit for 
 -- RLS
 alter table public.qr_codes enable row level security;
 
-create policy "qr_codes: read own company"
-  on public.qr_codes for select
-  using (company_id = public.get_my_company_id());
 
-create policy "qr_codes: insert if storekeeper or above"
-  on public.qr_codes for insert
-  with check (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager', 'storekeeper')
-    )
-  );
+do $$ begin
+  create policy "qr_codes: read own company"
+    on public.qr_codes for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
--- Only admins/managers delete QR codes (decommissioning)
-create policy "qr_codes: delete if manager or above"
-  on public.qr_codes for delete
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "qr_codes: insert if storekeeper or above"
+    on public.qr_codes for insert
+    with check (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager', 'storekeeper')
+      )
+    );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "qr_codes: delete if manager or above"
+    on public.qr_codes for delete
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 12_subscriptions.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 00_enums.sql
@@ -546,10 +648,12 @@ create index on public.subscriptions (provider_sub_id) where provider_sub_id is 
 -- RLS
 alter table public.subscriptions enable row level security;
 
--- All company members can read their subscription (needed for feature gate checks)
-create policy "subscriptions: read own company"
-  on public.subscriptions for select
-  using (company_id = public.get_my_company_id());
+
+do $$ begin
+  create policy "subscriptions: read own company"
+    on public.subscriptions for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
 
 -- Only admins see full subscription details including provider IDs
 -- (The read policy above applies to all members; providers IDs are low-risk for tenant members.)
@@ -587,17 +691,19 @@ create index on public.payments (subscription_id);
 -- RLS
 alter table public.payments enable row level security;
 
--- Only admins can view payment history
-create policy "payments: read admin only"
-  on public.payments for select
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role = 'admin'
-    )
-  );
+
+do $$ begin
+  create policy "payments: read admin only"
+    on public.payments for select
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role = 'admin'
+      )
+    );
+exception when duplicate_object then null; end $$;
 
 -- Rows are inserted by service role (payment webhook handler). No client insert policy.
 -- ============================================================
@@ -629,30 +735,33 @@ create index on public.clients (company_id, is_active);
 -- RLS
 alter table public.clients enable row level security;
 
--- All company members can look up clients (needed when creating invoices)
-create policy "clients: read own company"
-  on public.clients for select
-  using (company_id = public.get_my_company_id());
 
--- Only admins and managers may create, update, or delete clients
-create policy "clients: write if manager or above"
-  on public.clients for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
+do $$ begin
+  create policy "clients: read own company"
+    on public.clients for select
+    using (company_id = public.get_my_company_id());
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "clients: write if manager or above"
+    on public.clients for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
     )
-  )
-  with check (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+    with check (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 15_invoices.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 03_profiles.sql,
@@ -692,37 +801,40 @@ create index on public.invoices (created_by);
 -- RLS
 alter table public.invoices enable row level security;
 
--- Admins and managers read invoices
-create policy "invoices: read if manager or above"
-  on public.invoices for select
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
 
--- Only admins and managers create, update, or delete invoices
-create policy "invoices: write if manager or above"
-  on public.invoices for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
+do $$ begin
+  create policy "invoices: read if manager or above"
+    on public.invoices for select
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "invoices: write if manager or above"
+    on public.invoices for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
     )
-  )
-  with check (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+    with check (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 16_invoice_line_items.sql
 -- Requires: 01_rls_helper.sql, 02_companies.sql, 05_items.sql,
@@ -756,37 +868,40 @@ create index on public.invoice_line_items (stock_transaction_id) where stock_tra
 -- RLS
 alter table public.invoice_line_items enable row level security;
 
--- Line items inherit the same read/write access as their parent invoice:
--- admins and managers only.
-create policy "invoice_line_items: read if manager or above"
-  on public.invoice_line_items for select
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
 
-create policy "invoice_line_items: write if manager or above"
-  on public.invoice_line_items for all
-  using (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
+do $$ begin
+  create policy "invoice_line_items: read if manager or above"
+    on public.invoice_line_items for select
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "invoice_line_items: write if manager or above"
+    on public.invoice_line_items for all
+    using (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
     )
-  )
-  with check (
-    company_id = public.get_my_company_id()
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+    with check (
+      company_id = public.get_my_company_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 17_storage.sql
 -- Requires: 02_companies.sql, 03_profiles.sql
@@ -857,170 +972,202 @@ on conflict (id) do nothing;
 -- ------------------------------------------------------------
 -- logos bucket (public read, admin/manager write)
 -- ------------------------------------------------------------
-create policy "logos: public read"
-  on storage.objects for select
-  using (bucket_id = 'logos');
+do $$ begin
+  create policy "logos: public read"
+    on storage.objects for select
+    using (bucket_id = 'logos');
+exception when duplicate_object then null; end $$;
 
-create policy "logos: upload if admin or manager"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-        -- first path segment must be the caller's company_id
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+do $$ begin
+  create policy "logos: upload if admin or manager"
+    on storage.objects for insert
+    with check (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+          -- first path segment must be the caller's company_id
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "logos: update if admin or manager"
-  on storage.objects for update
-  using (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+do $$ begin
+  create policy "logos: update if admin or manager"
+    on storage.objects for update
+    using (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "logos: delete if admin"
-  on storage.objects for delete
-  using (
-    bucket_id = 'logos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role = 'admin'
-        and (storage.foldername(name))[1] = p.company_id::text
-    )
-  );
+do $$ begin
+  create policy "logos: delete if admin"
+    on storage.objects for delete
+    using (
+      bucket_id = 'logos'
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role = 'admin'
+          and (storage.foldername(name))[1] = p.company_id::text
+      )
+    );
+exception when duplicate_object then null; end $$;
 
 
 -- ------------------------------------------------------------
 -- avatars bucket (public read, owner write)
 -- ------------------------------------------------------------
-create policy "avatars: public read"
-  on storage.objects for select
-  using (bucket_id = 'avatars');
+do $$ begin
+  create policy "avatars: public read"
+    on storage.objects for select
+    using (bucket_id = 'avatars');
+exception when duplicate_object then null; end $$;
 
-create policy "avatars: upload own"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'avatars'
-    -- first path segment must be the caller's own user_id
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+do $$ begin
+  create policy "avatars: upload own"
+    on storage.objects for insert
+    with check (
+      bucket_id = 'avatars'
+      -- first path segment must be the caller's own user_id
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "avatars: update own"
-  on storage.objects for update
-  using (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+do $$ begin
+  create policy "avatars: update own"
+    on storage.objects for update
+    using (
+      bucket_id = 'avatars'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "avatars: delete own"
-  on storage.objects for delete
-  using (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+do $$ begin
+  create policy "avatars: delete own"
+    on storage.objects for delete
+    using (
+      bucket_id = 'avatars'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+exception when duplicate_object then null; end $$;
 
 
 -- ------------------------------------------------------------
 -- items bucket (private: company-scoped read, manager+ write)
 -- ------------------------------------------------------------
-create policy "items: read own company"
-  on storage.objects for select
-  using (
-    bucket_id = 'items'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-  );
+do $$ begin
+  create policy "items: read own company"
+    on storage.objects for select
+    using (
+      bucket_id = 'items'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "items: upload if manager or above"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'items'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "items: upload if manager or above"
+    on storage.objects for insert
+    with check (
+      bucket_id = 'items'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "items: update if manager or above"
-  on storage.objects for update
-  using (
-    bucket_id = 'items'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "items: update if manager or above"
+    on storage.objects for update
+    using (
+      bucket_id = 'items'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "items: delete if manager or above"
-  on storage.objects for delete
-  using (
-    bucket_id = 'items'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "items: delete if manager or above"
+    on storage.objects for delete
+    using (
+      bucket_id = 'items'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
 
 -- ------------------------------------------------------------
 -- assets bucket (private: company-scoped read, storekeeper+ write)
 -- ------------------------------------------------------------
-create policy "assets bucket: read own company"
-  on storage.objects for select
-  using (
-    bucket_id = 'assets'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-  );
+do $$ begin
+  create policy "assets bucket: read own company"
+    on storage.objects for select
+    using (
+      bucket_id = 'assets'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "assets bucket: upload if storekeeper or above"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'assets'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager', 'storekeeper')
-    )
-  );
+do $$ begin
+  create policy "assets bucket: upload if storekeeper or above"
+    on storage.objects for insert
+    with check (
+      bucket_id = 'assets'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager', 'storekeeper')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "assets bucket: update if storekeeper or above"
-  on storage.objects for update
-  using (
-    bucket_id = 'assets'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager', 'storekeeper')
-    )
-  );
+do $$ begin
+  create policy "assets bucket: update if storekeeper or above"
+    on storage.objects for update
+    using (
+      bucket_id = 'assets'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager', 'storekeeper')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy "assets bucket: delete if manager or above"
-  on storage.objects for delete
-  using (
-    bucket_id = 'assets'
-    and (storage.foldername(name))[1] = public.get_my_company_id()::text
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.role in ('admin', 'manager')
-    )
-  );
+do $$ begin
+  create policy "assets bucket: delete if manager or above"
+    on storage.objects for delete
+    using (
+      bucket_id = 'assets'
+      and (storage.foldername(name))[1] = public.get_my_company_id()::text
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.role in ('admin', 'manager')
+      )
+    );
+exception when duplicate_object then null; end $$;
 -- ============================================================
 -- 18_rpc_transaction_engine.sql
 -- Requires: 09_stock_transactions.sql, 08_inventory_balances.sql,

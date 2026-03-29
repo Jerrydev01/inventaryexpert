@@ -124,3 +124,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Theme Variances based on sector */
+.theme-wrapper[data-theme="construction"] {
+  --primary: #c4523a;
+  --primary-foreground: #ffffff;
+  --radius: 0rem; /* hard edges */
+}
+.theme-wrapper[data-theme="construction"].dark {
+  --primary: #c4523a;
+}
+
+.theme-wrapper[data-theme="agriculture"] {
+  --primary: oklch(0.55 0.15 140); /* Green */
+  --primary-foreground: oklch(0.985 0 0);
+  --radius: 1rem; /* soft edges */
+}
+.theme-wrapper[data-theme="agriculture"].dark {
+  --primary: oklch(0.65 0.15 140);
+}
+
+.theme-wrapper[data-theme="sales"],
+.theme-wrapper[data-theme="retail"] {
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --radius: 0.5rem; /* medium edges */
+}
+.theme-wrapper[data-theme="sales"].dark,
+.theme-wrapper[data-theme="retail"].dark {
+  --primary: #60a5fa;
+}

@@ -26,5 +26,5 @@ create policy "companies: read own"
 
 -- The admin update policy is created after public.profiles exists.
 
--- Insert is handled server-side via service role during onboarding only.
--- No client insert policy.
+-- Insert is handled server-side by the auth bootstrap trigger and any future
+-- privileged onboarding flows. No client insert policy.

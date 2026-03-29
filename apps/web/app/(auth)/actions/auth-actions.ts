@@ -1,6 +1,8 @@
 "use server";
 
+import { validateSectorSelection } from "@/lib/sectors";
 import { createActionClient } from "@/lib/supabase/action";
+import type { SectorEnum } from "@inventaryexpert/types";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -32,6 +34,41 @@ function getCredentials(formData: FormData): CredentialsResult {
   }
 
   return { email: normalizedEmail, password };
+}
+
+type RegistrationDetailsResult =
+  | {
+      companyName: string;
+      sector: SectorEnum;
+    }
+  | {
+      error: string;
+    };
+
+async function getRegistrationDetails(
+  formData: FormData,
+): Promise<RegistrationDetailsResult> {
+  const companyName = formData.get("companyName");
+  const sector = formData.get("sector");
+
+  if (typeof companyName !== "string" || typeof sector !== "string") {
+    return { error: "Invalid form submission." };
+  }
+
+  const normalizedCompanyName = companyName.trim();
+
+  if (!normalizedCompanyName) {
+    return { error: "Company name is required." };
+  }
+
+  const supabase = await createActionClient();
+  const validSector = await validateSectorSelection(supabase, sector);
+
+  if (!validSector) {
+    return { error: "Please select a valid business sector." };
+  }
+
+  return { companyName: normalizedCompanyName, sector: validSector };
 }
 
 async function getBaseUrl() {
@@ -75,9 +112,16 @@ export async function login(formData: FormData) {
 
 export async function register(formData: FormData) {
   const credentials = getCredentials(formData);
+  const registrationDetails = await getRegistrationDetails(formData);
 
   if ("error" in credentials) {
     redirect(`/register?error=${encodeURIComponent(credentials.error)}`);
+  }
+
+  if ("error" in registrationDetails) {
+    redirect(
+      `/register?error=${encodeURIComponent(registrationDetails.error)}`,
+    );
   }
 
   const supabase = await createActionClient();
@@ -85,6 +129,12 @@ export async function register(formData: FormData) {
   const { error } = await supabase.auth.signUp({
     email: credentials.email,
     password: credentials.password,
+    options: {
+      data: {
+        company_name: registrationDetails.companyName,
+        sector: registrationDetails.sector,
+      },
+    },
   });
 
   if (error) {
